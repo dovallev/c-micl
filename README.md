@@ -19,15 +19,14 @@ Our approach bridges mathematical optimization and machine learning, offering a 
 
 ```plaintext
 .
-├── classification.py       # Runs the classification case study (WFP/Syria dataset)
+├── classification.py       # Runs the classification case study (Food basket)
+├── classification_oracle       # Contains the neural network used as an oracle for the classification setting
 ├── regression.py           # Runs the regression case study (chemical reactor dataset)
 ├── requirements.txt        # Python dependencies
 └── data/
     ├── unscaled_noisy_reactor_data.xlsx         # Provided data for regression case study
     ├── WFP_dataset.csv     # Required for classification (must be downloaded)
     └── Syria_instance.xlsx # Required for classification (must be downloaded)
-
-
 ```
 
 ## Getting Started
