@@ -28,7 +28,7 @@ Our approach bridges mathematical optimization and machine learning, offering a 
     └── Syria_instance.xlsx # Required for classification (must be downloaded)
 
 
----
+```
 
 ## Getting Started
 
@@ -40,3 +40,4 @@ We recommend using a virtual environment:
 python -m venv venv
 source venv/bin/activate        # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
+```
