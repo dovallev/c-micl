@@ -1,35 +1,41 @@
-import pandas as pd
-from sklearn.model_selection import train_test_split
-import numpy as np
-from sklearn.metrics import mean_squared_error
-from sklearn.model_selection import KFold
-from sklearn.utils import resample
-from sklearn.base import clone
-import itertools
-from tqdm import tqdm
-import pyomo.environ as pyo
-import time
-
-import torch
-import torch.nn as nn
-from torch.utils.data import Dataset, DataLoader
-import torch.optim as optim
-import torch.nn as nn
-from torch.nn.functional import softmax
-from sklearn.model_selection import KFold
-from torch.utils.data import DataLoader
-import matplotlib.pyplot as plt
-from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
-import tempfile
-
-from omlt.io import load_onnx_neural_network_with_bounds, write_onnx_model_with_bounds
+# Standard library
 import copy
-
+import csv
+import itertools
 import os
 import sys
+import tempfile
+import time
 
+# Third-party libraries
 import cloudpickle as cp
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+from sklearn.base import clone
+from sklearn.metrics import (
+    confusion_matrix,
+    ConfusionMatrixDisplay,
+    mean_squared_error,
+)
+from sklearn.model_selection import KFold, train_test_split
+from sklearn.utils import resample
+from tqdm import tqdm
+import pyomo.environ as pyo
 
+# PyTorch
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.nn.functional import softmax
+from torch.utils.data import DataLoader, Dataset
+
+# OMLT
+from omlt import OmltBlock
+from omlt.io import load_onnx_neural_network_with_bounds, write_onnx_model_with_bounds
+from omlt.neuralnet import ReluBigMFormulation
+
+# Project-specific (local) paths
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 
 def to_pickle(object, path):
@@ -79,290 +85,162 @@ def train_ensemble(model_class, hyperparams, X, y, P, size):
 def ensemble_predict(ensemble, X):
     preds = np.array([m.predict(X) for m in ensemble])
     return np.mean(preds, axis=0)
-
-    
-def train_ensembles(X_train, y_train, models_and_params, P_list, cv=False, name_file='model'):
-    
-    bootstrap_size = int(0.5 * len(X_train))  # you can customize this
-    kf = KFold(n_splits=5, shuffle=True, random_state=42)
-    
-    for P in P_list:
-        print(f'\n Train ensemble of {P} predictors')
-        print()
-        ensemble_results = {}
-        
-        # Loop through models
-        for name, (base_model, param_grid) in models_and_params.items():
-            print(f"\nTuning {name} Ensemble...")
-            best_score = float("inf")
-            best_params = None
-            best_ensemble = None
-            t_start = time.time()
-
-            # Manual grid search over hyperparameter combinations
-            keys, values = zip(*param_grid.items())
-            param_list = itertools.product(*values)
-            for param_values in tqdm(param_list):
-                params = dict(zip(keys, param_values))
-                cv_scores = []
-
-                if cv:
-                    for train_idx, val_idx in kf.split(X_train):
-                        X_tr, y_tr = X_train.iloc[train_idx], y_train.iloc[train_idx]
-                        X_val, y_val = X_train.iloc[val_idx], y_train.iloc[val_idx]
-
-                        ensemble = train_ensemble(base_model, params, X_tr, y_tr, P, bootstrap_size)
-                        y_pred = ensemble_predict(ensemble, X_val)
-                        cv_scores.append(mean_squared_error(y_val, y_pred))
-
-                    avg_cv_score = np.mean(cv_scores)
-                    if avg_cv_score < best_score:
-                        best_params = params
-                        best_score = avg_cv_score
-
-                else:
-                    best_params = params
-                    best_score = 9999
-
-            best_ensemble = train_ensemble(base_model, best_params, X_train, y_train, P, bootstrap_size)
-
-            ensemble_results[name] = {
-                "best_score": best_score,
-                "best_params": best_params,
-                "best_ensemble": best_ensemble,
-                "val_time": time.time()- t_start
-            }
-            print(f"Best score for {name}: {best_score:.6f}")
-            print(f"    Params: {best_params}")
-
-        print()
-        print(ensemble_results)
-        print()
-
-        tail = ''
-        if cv:
-            tail = '_cv'
-
-        to_pickle(ensemble_results, f'{P}_{name_file}{tail}')
-
-def train_model(X_train, y_train, models_and_params, cv=False, name_file='model'):
-    
-    kf = KFold(n_splits=5, shuffle=True, random_state=42)
-    
-    ensemble_results = {}
-    
-    # Loop through models
-    for name, (base_model, param_grid) in models_and_params.items():
-        print(f"\nTuning {name} Ensemble...")
-        best_score = float("inf")
-        best_params = None
-        best_ensemble = None
-        t_start = time.time()
-
-        # Manual grid search over hyperparameter combinations
-        keys, values = zip(*param_grid.items())
-        param_list = itertools.product(*values)
-        for param_values in tqdm(param_list):
-            params = dict(zip(keys, param_values))
-            cv_scores = []
-
-            if cv:
-                for train_idx, val_idx in kf.split(X_train):
-                    X_tr, y_tr = X_train.iloc[train_idx], y_train.iloc[train_idx]
-                    X_val, y_val = X_train.iloc[val_idx], y_train.iloc[val_idx]
-
-                    model = clone(base_model)
-                    model.set_params(**params)
-                    model.fit(X_tr, y_tr)
-                    y_pred = model.predict(X_val)
-                    cv_scores.append(mean_squared_error(y_val, y_pred))
-
-                avg_cv_score = np.mean(cv_scores)
-                if avg_cv_score < best_score:
-                    best_params = params
-                    best_score = avg_cv_score
-
-            else:
-                best_params = params
-                best_score = float('inf')
-
-        best_ensemble = clone(base_model)
-        best_ensemble.set_params(**best_params)
-        best_ensemble.fit(X_train, y_train)
-
-        ensemble_results[name] = {
-            "best_score": best_score,
-            "best_params": best_params,
-            "best_ensemble": best_ensemble,
-            "val_time": time.time()- t_start
-        }
-        print(f"Best score for {name}: {best_score:.6f}")
-        print(f"    Params: {best_params}")
-
-    print()
-    print(ensemble_results)
-    print()
-
-    tail = ''
-    if cv:
-        tail = '_cv'
-
-    to_pickle(ensemble_results, f'{name_file}{tail}')
-
-
-
+   
+# Define a fully-connected neural network with configurable hidden dimension and number of layers
 class NeuralNetwork(nn.Module):
     def __init__(self, hidden_dim=8, num_layers=4):
         super(NeuralNetwork, self).__init__()
-        
+
         layers = []
 
-        # Input layer
+        # Input layer: 25 input features → hidden_dim output units
         layers.append(nn.Linear(25, hidden_dim))
         layers.append(nn.ReLU())
 
-        # Hidden layers
+        # Add (num_layers - 1) hidden layers, each followed by ReLU activation
         for _ in range(num_layers - 1):
             layers.append(nn.Linear(hidden_dim, hidden_dim))
             layers.append(nn.ReLU())
 
-        # Output layer
+        # Output layer: hidden_dim → 4 output units (e.g., 4 class logits or targets)
         layers.append(nn.Linear(hidden_dim, 4))
 
-        # Wrap in Sequential
+        # Chain all layers into a single sequential model
         self.network = nn.Sequential(*layers)
 
+    # Forward pass definition
     def forward(self, x):
         return self.network(x)
-    
+
+
+# Custom PyTorch Dataset to wrap a pandas DataFrame for training
 class CustomDataset(Dataset):
     def __init__(self, dataframe, input_columns, target_column):
-        # Convert the input DataFrame into torch tensors
+        # Extract input features and convert to float32 torch tensor
         self.X = torch.tensor(dataframe[input_columns].values, dtype=torch.float32)
-        self.y = torch.tensor(dataframe[target_column].values, dtype=torch.long)  # Assuming classification
 
+        # Extract target column and convert to long tensor (for classification tasks)
+        self.y = torch.tensor(dataframe[target_column].values, dtype=torch.long)
+
+    # Return the total number of samples
     def __len__(self):
         return len(self.X)
 
+    # Return a single sample (input, target) pair
     def __getitem__(self, idx):
         return self.X[idx], self.y[idx]
     
-def train_nn_kfold_and_final(model_class, dataset, num_epochs=500, lr=0.01, k=5, save_path="final_model.pth", weight_decay=1e-5, hidden_dim=8, num_layers=4):
-    # KFold split
+def train_nn_kfold_and_final(model_class, dataset, num_epochs=500, lr=0.01, k=5, 
+                              save_path="final_model.pth", weight_decay=1e-5, 
+                              hidden_dim=8, num_layers=4):
+    # Initialize k-fold cross-validation
     kfold = KFold(n_splits=k, shuffle=True, random_state=42)
-    fold_results = []  # Store the results (e.g., accuracy, loss) for each fold
+    fold_results = []  # To store loss and accuracy for each fold
     
-    # Loop over each fold
+    # Cross-validation loop
     for fold, (train_idx, val_idx) in enumerate(kfold.split(dataset)):
         print(f"\nFold {fold+1}/{k} training...")
 
-        # Split the data into train and validation sets
+        # Split dataset into training and validation subsets
         train_subset = torch.utils.data.Subset(dataset, train_idx)
         val_subset = torch.utils.data.Subset(dataset, val_idx)
 
-        # Create DataLoaders for training and validation data
+        # Create DataLoaders
         train_loader = DataLoader(train_subset, batch_size=32, shuffle=True)
         val_loader = DataLoader(val_subset, batch_size=32, shuffle=False)
 
-        # Initialize model, optimizer, and loss function for each fold
-        model = model_class(hidden_dim=hidden_dim, num_layers=num_layers)  # Initialize model with dropout
-        optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)  # L2 Regularization (weight_decay)
+        # Initialize a fresh model, optimizer, and loss function
+        model = model_class(hidden_dim=hidden_dim, num_layers=num_layers)
+        optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
         criterion = nn.CrossEntropyLoss()
 
-        # Training loop
+        # Training loop over epochs
         for epoch in range(num_epochs):
             model.train()
             running_loss = 0.0
-            
-            for images, labels in train_loader:
+
+            for data_x, labels in train_loader:
                 # Forward pass
-                outputs = model(images)
+                outputs = model(data_x)
                 loss = criterion(outputs, labels)
 
-                # Backward pass
+                # Backpropagation and optimization step
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
 
                 running_loss += loss.item()
 
+            # Print loss every 10 epochs
             if (epoch + 1) % 10 == 0:
                 avg_loss = running_loss / len(train_loader)
                 print(f"Epoch [{epoch+1}/{num_epochs}], Loss: {avg_loss:.4f}")
 
-        # Evaluate model on validation set
-        model.eval()  # Set model to evaluation mode
+        # Evaluation on validation set
+        model.eval()
         correct = 0
         total = 0
         val_loss = 0.0
-        
-        with torch.no_grad():  # Disable gradient calculation during validation
-            for images, labels in val_loader:
-                outputs = model(images)
+
+        # No gradient needed for validation
+        with torch.no_grad():
+            for data_x, labels in val_loader:
+                outputs = model(data_x)
                 loss = criterion(outputs, labels)
                 val_loss += loss.item()
 
+                # Get predictions and compute accuracy
                 _, predicted = torch.max(outputs.data, 1)
                 total += labels.size(0)
                 correct += (predicted == labels).sum().item()
 
-        # Calculate validation accuracy and loss
+        # Compute average validation loss and accuracy
         avg_val_loss = val_loss / len(val_loader)
         accuracy = 100 * correct / total
         print(f"Validation Loss: {avg_val_loss:.4f}, Accuracy: {accuracy:.2f}%")
 
         fold_results.append((avg_val_loss, accuracy))
 
-    # Calculate average results across all folds
+    # Aggregate cross-validation metrics
     avg_loss = sum([result[0] for result in fold_results]) / k
     avg_accuracy = sum([result[1] for result in fold_results]) / k
     print(f"\nK-Fold CV Results: Average Loss: {avg_loss:.4f}, Average Accuracy: {avg_accuracy:.2f}%")
 
-    # Final training on the entire dataset
+    # Train final model on the entire dataset
     print("\nTraining the final model on the entire dataset...")
-    model = model_class(hidden_dim=hidden_dim, num_layers=num_layers)   
-    optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)  # L2 Regularization (weight_decay)
+    model = model_class(hidden_dim=hidden_dim, num_layers=num_layers)
+    optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
 
-    # Using the entire dataset for final training
+    # DataLoader for the full dataset
     train_loader_full = DataLoader(dataset, batch_size=32, shuffle=True)
 
     # Training loop on full data
     for epoch in range(num_epochs):
         model.train()
         running_loss = 0.0
-        
+
         for images, labels in train_loader_full:
-            # Forward pass
             outputs = model(images)
             loss = criterion(outputs, labels)
 
-            # Backward pass
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
 
             running_loss += loss.item()
 
+        # Print full training loss every 10 epochs
         if (epoch + 1) % 10 == 0:
             avg_loss = running_loss / len(train_loader_full)
             print(f"Epoch [{epoch+1}/{num_epochs}], Loss: {avg_loss:.4f}")
 
-    # Save the final trained model
+    # Save the trained model's parameters
     torch.save(model.state_dict(), save_path)
     print(f"Final model saved to {save_path}")
     
     return model
 
 def evaluate_model(model, loader, class_names=[0,1,2,3]):
-    """
-    Evaluates a PyTorch model on a given DataLoader.
-    Calculates accuracy and plots the confusion matrix.
-    
-    Args:
-        model (torch.nn.Module): The trained model.
-        loader (torch.utils.data.DataLoader): DataLoader with (X, y) batches.
-        class_names (list, optional): Names of classes for labeling the confusion matrix.
-    """
     model.eval()  # Set model to evaluation mode
     all_preds = []
     all_labels = []
@@ -390,62 +268,195 @@ def evaluate_model(model, loader, class_names=[0,1,2,3]):
     plt.show()
 
 def build_base_model(nutr_val, nutr_req, cost_p):
+    # Create a concrete Pyomo model instance
     m = pyo.ConcreteModel()
+    
+    # Define sets:
+    # - m.K: food items (indexed by rows of nutr_val)
+    # - m.L: nutrient types (indexed by columns of nutr_req)
+    # - m.LABELS: arbitrary label set (e.g., for feasibility classes)
+    # - m.VALID / m.INVALID: label subsets
     m.K = pyo.Set(initialize=list(nutr_val.index)) 
     m.L = pyo.Set(initialize=list(nutr_req.columns))
-    m.LABELS = pyo.Set(initialize=[0,1,2,3])
+    m.LABELS = pyo.Set(initialize=[0, 1, 2, 3])
+    m.VALID = pyo.Set(initialize=[2, 3])
+    m.INVALID = pyo.Set(initialize=[0, 1])
 
+    # Create an index-to-position mapper 
     m.mapper = {idx: pos for pos, idx in enumerate(nutr_val.index)}
 
-    m.x = pyo.Var(m.K, within=pyo.NonNegativeReals)  
+    # Define decision variables:
+    # x[k]: amount of food item k to include in the solution (non-negative)
+    m.x = pyo.Var(m.K, within=pyo.NonNegativeReals)
 
+    # Objective: minimize total cost of selected food items
     @m.Objective(sense=pyo.minimize)
     def obj(m):
-        return sum(cost_p[k].item()*m.x[k] for k in m.K)
+        return sum(cost_p[k].item() * m.x[k] for k in m.K)
 
+    # Constraints: ensure that each nutrient requirement is met
     @m.Constraint(m.L)
     def meet_req(m, l):
         return sum(m.x[k] * nutr_val.loc[k, l] for k in m.K) >= nutr_req[l].item()
 
+    # Hard constraint: fix the quantity of sugar used to 0.2
     @m.Constraint()
     def sugar_req(m):
         return m.x['Sugar'] == 0.2
 
+    # Hard constraint: fix the quantity of salt used to 0.05
     @m.Constraint()
     def salt_req(m):
         return m.x['Salt'] == 0.05
-    
+
     return m
 
 def pytorch_to_omlt(model, input_dim, input_bounds):
+    # Generate dummy input with the same dimension as the model expects
     x = torch.randn(64, input_dim, requires_grad=True)
 
+    # Container for the ONNX file path
     pytorch_model = None
+
+    # Export the PyTorch model to ONNX and add input bounds
     with tempfile.NamedTemporaryFile(suffix=".onnx", delete=False) as f:
         torch.onnx.export(
-            model,
-            x,
-            f,
-            input_names=["input"],
-            output_names=["output"],
-            dynamic_axes={"input": {0: "batch_size"}, "output": {0: "batch_size"}},
+            model,                              # PyTorch model to export
+            x,                                  # Example input tensor
+            f,                                  # File object for ONNX output
+            input_names=["input"],              # Name of input tensor
+            output_names=["output"],            # Name of output tensor
+            dynamic_axes={"input": {0: "batch_size"}, "output": {0: "batch_size"}},  # Allow variable batch sizes
         )
+
+        # Add input bounds to the ONNX model for OMLT compatibility
         write_onnx_model_with_bounds(f.name, None, input_bounds)
+
         print(f"Wrote PyTorch model to {f.name}")
         pytorch_model = f.name
 
+    # Load the ONNX model with bounds into an OMLT-compatible structure
     network_definition = load_onnx_neural_network_with_bounds(pytorch_model)
 
     return network_definition
 
+def update_non_conformal_model(m, ensemble, input_bounds):
+    # Add a set of predictors (one per ensemble model)
+    m.P = pyo.Set(initialize=list(range(len(ensemble))))
+    
+    # y[j, p]: output of neural net predictor p for label j (continuous)
+    m.y = pyo.Var(m.LABELS, m.P)
 
+    # z[p]: binary variable indicating whether predictor p is "activated" or contributes
+    m.z = pyo.Var(m.P, within=pyo.Binary)
+
+    # w[v, p]: binary indicating if class v ∈ VALID "wins" over others in predictor p
+    m.w = pyo.Var(m.VALID, m.P, within=pyo.Binary)
+
+    # Create a surrogate block per ensemble member using OMLT
+    m.surrogate = OmltBlock(m.P)
+
+    for p, model in enumerate(ensemble):
+        # Convert PyTorch model to OMLT compatible object
+        neural_net = pytorch_to_omlt(model, 25, input_bounds)
+        
+        # Build ReLU Big-M formulation for the network
+        formulation = ReluBigMFormulation(neural_net)
+        m.surrogate[p].build_formulation(formulation)
+
+    # Input constraint: map model x[k] decision variable into NN input
+    @m.Constraint(m.K, m.P)
+    def connect_inputs(m, k, p):
+        return m.x[k] == m.surrogate[p].inputs[m.mapper[k]]
+
+    # Output constraint: map surrogate output to y[j, p] variable
+    @m.Constraint(m.LABELS, m.P)
+    def connect_outputs(m, j, p):
+        return m.y[j, p] == m.surrogate[p].outputs[j]
+
+    # Big-M constraint: forces w[v, p] to 0 if invalid label u has higher score than valid v
+    @m.Constraint(m.VALID, m.INVALID, m.P)
+    def bigm(m, v, u, p):
+        return m.y[u, p] + 1e-6 - m.y[v, p] <= m.M * (1 - m.w[v, p])
+
+    # Link w[v, p] to z[p]: if any valid class wins, then z[p] can be 1
+    @m.Constraint(m.P)
+    def link_z(m, p):
+        return m.z[p] <= sum(m.w[v, p] for v in m.VALID)
+
+    # Aggregate conformity constraint: a fraction of predictors must agree with VALID classes
+    @m.Constraint()
+    def z_activation(m):
+        return sum(m.z[p] for p in m.P) >= len(m.P) * (1 - m.alpha)
+
+    # At least one VALID label must win in each predictor 
+    @m.Constraint(m.P)
+    def palatable_diet(m, p):
+        return sum(m.w[v, p] for v in m.VALID) >= 1
+
+    return m
+
+def update_conformal_model(m, qhat, f_model, input_bounds):
+    # y_f[j]: output from surrogate for label j
+    m.y_f = pyo.Var(m.LABELS)
+
+    # Block to hold the surrogate model formulation
+    m.f_surrogate = OmltBlock()
+
+    # q̂: conformal threshold
+    m.qhat = pyo.Param(initialize=qhat)
+
+    # z[j]: binary variable indicating whether label j is included in the prediction set
+    m.z = pyo.Var(m.LABELS, within=pyo.Binary)
+
+    # Convert PyTorch model to OMLT-compatible network
+    f_network_definition = pytorch_to_omlt(f_model, 25, input_bounds)
+
+    # Use Big-M formulation for ReLU neural network
+    f_formulation = ReluBigMFormulation(f_network_definition)
+
+    # Embed the surrogate model into the Pyomo block
+    m.f_surrogate.build_formulation(f_formulation)
+
+    # Connect decision variable inputs (m.x[k]) to surrogate input layer
+    @m.Constraint(m.K)
+    def f_connect_inputs(m, k):
+        return m.x[k] == m.f_surrogate.inputs[m.mapper[k]]
+
+    # Connect surrogate outputs to prediction variables y_f[j]
+    @m.Constraint(m.LABELS)
+    def f_connect_outputs(m, j):
+        return m.y_f[j] == m.f_surrogate.outputs[j]
+
+    # First Big-M constraint
+    @m.Constraint(m.LABELS)
+    def big_m(m, j):
+        return -m.y_f[j] - m.qhat <= m.M * (1 - m.z[j])
+
+    # Second Big-M
+    @m.Constraint(m.LABELS)
+    def big_m2(m, j):
+        return m.y_f[j] + m.qhat + 1e-6 <= m.M * m.z[j]
+
+    # Enforce at least one valid label is selected (e.g., diet is palatable)
+    @m.Constraint()
+    def palatable_diet(m):
+        return sum(m.z[i] for i in m.VALID) >= 1
+
+    # Prevent selecting invalid labels (e.g., those labeled undesirable)
+    @m.Constraint(m.INVALID)
+    def no_label(m, i):
+        return m.z[i] == 0
+
+    return m
 
 if __name__ == "__main__":
     # Parameters
-    P_list = [5, 10]
+    P_list = [1, 5, 10]
     alphas = [0.1, 0.05]
     iterations = 100
     epochs = 500
+    M_factor = 10
 
     # Import data
     dataset = pd.read_csv('data/WFP_dataset.csv').sample(frac=1)
@@ -498,7 +509,7 @@ if __name__ == "__main__":
                                     hidden_dim=64, 
                                     num_layers=3)
     # Train W-MICL
-    for P in P_list:
+    for P in P_list[1:]:
         for i in range(P):
 
             df_bootstrap = copy.deepcopy(X_rest)
@@ -533,39 +544,43 @@ if __name__ == "__main__":
                                     num_layers=3)
 
 
+    # Initialize and load the trained model
     model = NeuralNetwork(hidden_dim=64, num_layers=3)
-    model.load_state_dict(torch.load("model_epoch500_weight100_hid64_numlay3.pth"))
+    model.load_state_dict(torch.load(f"model_epoch{epochs}_weight100_hid64_numlay3.pth"))
     model.eval()
+
+    # Evaluate performance on a holdout set (optional diagnostic)
     evaluate_model(model, unseen_loader)
 
+    # Store all labels and logits for conformal calibration
     all_labels = []
     all_logits = []
 
-    with torch.no_grad():  # 
-        for images, labels in cal_loader:
-        # for images, labels in unseen_loader:
-
-            # Get raw logits from the model
-            logits = model(images)
-
-            # Apply softmax to the logits for the entire batch
-            softmax_probs = softmax(logits, dim=1)
-
-            # Save softmax probabilities (for analysis)
+    # Disable gradients during calibration
+    with torch.no_grad():
+        for data, labels in cal_loader:
+            logits = model(data)  # Raw logits (pre-softmax)
             all_labels.append(labels)
             all_logits.append(logits)
 
+    # Concatenate results into tensors of shape [N, num_classes] and [N]
     all_labels = torch.cat(all_labels, dim=0)
     all_logits = torch.cat(all_logits, dim=0)
 
+    # Compute nonconformity scores: negative logit of the true class
+    # s_i = -logit_{true_label}(x_i)
+    s = -all_logits[torch.arange(all_labels.size(0)), all_labels]
+
+    # Dictionary to store q̂_α for different α levels
     qhats = {}
 
-    s = - all_logits[torch.arange(all_labels.size(0)), all_labels]
-
+    # Conformal quantile computation using empirical quantiles
     for alpha in alphas:
-        qhats[alpha] = np.quantile(s, np.ceil((len(X_cal)+1)*(1 - alpha))/len(X_cal), interpolation='higher')
+        quantile_level = np.ceil((len(X_cal) + 1) * (1 - alpha)) / len(X_cal)
+        qhats[alpha] = np.quantile(s, quantile_level, interpolation="higher")
 
-    max_s = np.max(np.abs(s))
+    # Store maximum absolute logit value (used in MILP big-M constants)
+    max_s = float(torch.max(torch.abs(all_logits)))
 
     csv_columns = ['alpha', 'surrogate_type', 'min_req', 'iteration', 'oracle_prediction', 
                 'true_feasibility',  'predicted_feasibility',   
@@ -581,8 +596,9 @@ if __name__ == "__main__":
 
         # Iterate over confidence levels (alphas)
         for alpha in alphas:
-            # Load ensemble or conformal predictors depending on the case
-            if not P == 'Conformal':
+            # === Load surrogate model(s) and input bounds ===
+            if P != 'Conformal':
+                # Load ensemble models
                 ensemble = []
                 for i in range(P):
                     model = NeuralNetwork(hidden_dim=64, num_layers=3)
@@ -590,42 +606,129 @@ if __name__ == "__main__":
                     model.eval()
                     ensemble.append(model)
 
+                # Use bounds from rest set
                 lb = np.min(X_rest, axis=0)
                 ub = np.max(X_rest, axis=0)
                 input_bounds = list(zip(lb, ub))
                 qhat = None
+
             else:
+                # Load single conformal model
                 f_model = NeuralNetwork(hidden_dim=64, num_layers=3)
-                f_model.load_state_dict(torch.load("model_epoch500_weight100_hid64_numlay3.pth"))
+                f_model.load_state_dict(torch.load(f"model_epoch{epochs}_weight100_hid64_numlay3.pth"))
                 f_model.eval()
+
+                # Use bounds from training set
                 lb = np.min(X_train, axis=0)
                 ub = np.max(X_train, axis=0)
                 input_bounds = list(zip(lb, ub))
                 qhat = qhats[alpha]
 
-            oracle = from_pickle('wfp/oracle')['best_model']
-            new_result = {}
+            # === Load feasibility oracle ===
+            oracle = from_pickle('classification_oracle')['best_model']
+
+            # === Optimization loop for multiple cost vectors ===
             indices = cost_p.index
-            res = []
-            np.random.seed(0) # Ensure reproducibility of cost vector
+            np.random.seed(0)  # Ensures reproducibility
+
+            for i in range(iterations):
+                # Generate a random cost vector
+                values = np.random.uniform(0.1, 4, size=len(indices))
+                cost_p_ran = pd.Series(values, index=indices).round(2)
+
+                # Build base diet model
+                m = build_base_model(nutr_val, nutr_req, cost_p_ran)
+                m.alpha = pyo.Param(initialize=alpha)
+                m.min_req = pyo.Param(initialize=0.5)
+                m.M = pyo.Param(initialize=M_factor * max_s)
+
+                # Attach surrogate logic
+                if P != 'Conformal':
+                    m = update_non_conformal_model(m, ensemble, input_bounds)
+                else:
+                    m = update_conformal_model(m, qhat, f_model, input_bounds)
+
+                # === Solve MILP model ===
+                solver = pyo.SolverFactory('gurobi_direct')
+                solver.options['MIPGap'] = 0.01
+                solver.options['Threads'] = 8
+                results = solver.solve(m, tee=False)
+
+                # === Extract solution and evaluate ===
+                x_val = m.x.extract_values()
+                x_df = pd.DataFrame([x_val])
+
+                if not x_df.isnull().values.any():
+                    # Bounds and gap
+                    lb = results.problem.lower_bound
+                    ub = results.problem.upper_bound
+                    gap = abs(ub - lb) / (max(lb, ub) + 1e-10)
+
+                    # Oracle prediction
+                    y_pred = oracle.predict(x_df)
+                    x_list = [x_val[k] for k in nutr_val.index]
+
+                    # Extract surrogate outputs
+                    if P != 'Conformal':
+                        y_val = m.y.extract_values()
+                        y_list = [[m.y[j, p]() for j in m.LABELS] for p in m.P]
+                        z_val = m.z.extract_values()
+                        z_list = list(z_val.values())
+                        pred_feas = float(np.mean(z_list))
+                    else:
+                        y_val = m.y_f.extract_values()
+                        z_val = m.z.extract_values()
+                        y_list = list(y_val.values())
+                        z_list = list(z_val.values())
+                        pred_feas = z_list
+
+                    new_result = {
+                        'alpha': alpha, 'surrogate_type': None, 'min_req': None, 'iteration': i,
+                        'oracle_prediction': float(y_pred[0]),
+                        'true_feasibility': int(float(y_pred[0]) >= 0.5),
+                        'predicted_feasibility': pred_feas,
+                        'objective': round(m.obj(), 8),
+                        'time': round(results.solver.wallclock_time, 4),
+                        'continuous_vars': results.problem.number_of_continuous_variables,
+                        'binary_vars': results.problem.number_of_binary_variables,
+                        'constraints': results.problem.number_of_constraints,
+                        'termination': str(results.solver.termination_condition),
+                        'gap': round(100 * gap, 4),
+                        'qhat': qhat,
+                        'y_list': y_list,
+                        'x_list': x_list,
+                        'z_list': z_list
+                    }
+
+                else:
+                    new_result = {
+                        'alpha': alpha, 'surrogate_type': None, 'min_req': None, 'iteration': i,
+                        'oracle_prediction': None,
+                        'true_feasibility': None,
+                        'predicted_feasibility': None,
+                        'objective': None,
+                        'time': round(results.solver.wallclock_time, 4),
+                        'continuous_vars': results.problem.number_of_continuous_variables,
+                        'binary_vars': results.problem.number_of_binary_variables,
+                        'constraints': results.problem.number_of_constraints,
+                        'termination': str(results.solver.termination_condition),
+                        'gap': None,
+                        'qhat': qhat,
+                        'y_list': None,
+                        'x_list': None,
+                        'z_list': None
+                    }
+
+                # Save result and write to CSV
+                dict_data.append(new_result)
+
+                try:
+                    with open(csv_file, 'w') as csvfile:
+                        writer = csv.DictWriter(csvfile, fieldnames=csv_columns)
+                        writer.writeheader()
+                        for data in dict_data:
+                            writer.writerow(data)
+                except IOError:
+                    print("I/O error")
 
 
-
-    # lb = np.min(X_rest, axis=0)
-    # ub = np.max(X_rest, axis=0)
-    # input_bounds = list(zip(lb, ub))
-    # to_pickle(input_bounds, 'input_bounds_p')
-
-    # lb = np.min(X_train, axis=0)
-    # ub = np.max(X_train, axis=0)
-    # input_bounds = list(zip(lb, ub))
-    # to_pickle(input_bounds, 'input_bounds_conf')
-
-
-
-
-
-
-
-
-    
