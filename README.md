@@ -23,12 +23,12 @@ Our approach bridges mathematical optimization and machine learning, offering a 
 ├── regression.py           # Runs the regression case study (chemical reactor dataset)
 ├── requirements.txt        # Python dependencies
 └── data/
-    ├── reactor.csv         # Provided data for regression case study
+    ├── unscaled_noisy_reactor_data.xlsx         # Provided data for regression case study
     ├── WFP_dataset.csv     # Required for classification (must be downloaded)
     └── Syria_instance.xlsx # Required for classification (must be downloaded)
 
 
----
+```
 
 ## Getting Started
 
@@ -40,3 +40,50 @@ We recommend using a virtual environment:
 python -m venv venv
 source venv/bin/activate        # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
+```
+
+
+### 2. Prepare Datasets
+
+#### Regression Case Study
+
+The file `unscaled_noisy_reactor_data.xlsx` used in the regression case study is already included in the `data/` folder:
+
+```plaintext
+data/
+└── unscaled_noisy_reactor_data.xlsx
+```
+### Classification Case Study
+
+To run the classification experiment, you need two additional datasets that are **not included** in this repository.
+
+#### Step 1: Download Required Files
+
+Download the following files from the [OptiCL GitHub repository](https://github.com/hwiberg/OptiCL):
+
+- [`WFP_dataset.csv`](https://github.com/hwiberg/OptiCL)
+- [`Syria_instance.xlsx`](https://github.com/hwiberg/OptiCL)
+
+#### Step 2: Place in the Data Folder
+
+After downloading, move the files into the `data/` directory of this repository:
+
+```plaintext
+data/
+├── WFP_dataset.csv
+└── Syria_instance.xlsx
+```
+
+### 3. Run Experiments
+
+#### Regression Case Study
+
+```bash
+python regression.py
+```
+
+#### Classification Case Study
+
+```bash
+python classification.py
+```
