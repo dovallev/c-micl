@@ -106,7 +106,7 @@ These notebooks cover:
   - Translating conformal sets into deterministic optimization constraints
   - Embedding learned models into Pyomo formulations
   - Using OMLT to represent neural network surrogates
-  - End-to-end example of conformal constraints in optimization models
+  - End-to-end example of conformal constraints in mixed-integer optimization models
 
 ---
 
