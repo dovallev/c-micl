@@ -3,15 +3,11 @@
 This repository contains the implementation of the experiments presented in the paper:
 
 **Title:** *Conformal Mixed-Integer Constraint Learning with Feasibility Guarantees*  
-**Authors:** Anon.
+**Authors:** Daniel Ovalle, Lorenz T. Biegler, Ignacio E. Grossmann, Carl D. Laird, and Mateo Dulce Rubio
 
 ## Abstract
 
-We propose **Conformal Mixed-Integer Constraint Learning (C-MICL)**, a novel framework that provides probabilistic feasibility guarantees for data-driven constraints in optimization problems. Unlike standard Mixed-Integer Constraint Learning methods that may violate true constraints due to model error or data limitations, C-MICL uses conformal prediction to ensure that feasible solutions are *ground-truth feasible* with probability at least \(1{-}\alpha\), under a conditional independence assumption.
-
-This framework supports both regression and classification tasks without requiring access to the true constraint function and avoids the scalability issues of ensemble-based heuristics. Experiments on real-world applications show that C-MICL consistently meets target feasibility rates, maintains competitive objective performance, and significantly reduces computational cost.
-
-Our approach bridges mathematical optimization and machine learning, offering a principled way to incorporate uncertainty-aware constraints into decision-making with rigorous statistical guarantees.
+We propose **Conformal Mixed-Integer Constraint Learning (C-MICL)**, a novel framework that provides probabilistic feasibility guarantees for data-driven constraints in optimization problems. While standard Mixed-Integer Constraint Learning methods often violate the true constraints due to model error or data limitations, our C-MICL approach leverages conformal prediction to ensure feasible solutions are ground-truth feasible with probability at least  $1{-}\alpha$, under a conditional independence assumption. The proposed framework supports both regression and classification tasks without requiring access to the true constraint function, while avoiding the scalability issues associated with ensemble-based heuristics. Experiments on real-world applications demonstrate that C-MICL consistently achieves target feasibility rates, maintains competitive objective performance, and significantly reduces computational cost compared to existing methods. Our work bridges mathematical optimization and machine learning, offering a principled approach to incorporate uncertainty-aware constraints into decision-making with rigorous statistical guarantees.
 
 ---
 
@@ -27,6 +23,11 @@ Our approach bridges mathematical optimization and machine learning, offering a 
     ├── unscaled_noisy_reactor_data.xlsx         # Provided data for regression case study
     ├── WFP_dataset.csv     # Required for classification (must be downloaded)
     └── Syria_instance.xlsx # Required for classification (must be downloaded)
+├── notebooks/                 # Tutorials on conformal prediction and Pyomo/OMLT integration
+    ├── data/                     # Auxiliary data used by the notebooks
+    └── regression/
+        ├── 01_conformal_tutorial.ipynb
+        └── 02_uncertainty_integration.ipynb
 ```
 
 ## Getting Started
@@ -86,3 +87,41 @@ python regression.py
 ```bash
 python classification.py
 ```
+
+---
+
+## Tutorial Notebooks
+
+The `notebooks/` folder contains detailed, self-contained tutorials that complement the experimental scripts by providing pedagogical and implementation-focused material.
+
+These notebooks cover:
+
+- **Conformal Prediction Fundamentals**
+  - Split and inductive conformal prediction
+  - Coverage guarantees and calibration
+  - Regression setting
+
+- **Integration with Pyomo and OMLT**
+  - Constructing uncertainty-aware constraints
+  - Translating conformal sets into deterministic optimization constraints
+  - Embedding learned models into Pyomo formulations
+  - Using OMLT to represent neural network surrogates
+  - End-to-end example of conformal constraints in optimization models
+
+---
+
+## Citation
+
+If you find this repository or the associated methodology useful in your work, please consider citing:
+
+```bibtex
+@inproceedings{
+ovalle2025conformal,
+title={Conformal Mixed-Integer Constraint Learning with Feasibility Guarantees},
+author={Daniel Ovalle and Lorenz T. Biegler and Ignacio E Grossmann and Carl D Laird and Mateo Dulce Rubio},
+booktitle={The Thirty-ninth Annual Conference on Neural Information Processing Systems},
+year={2025},
+url={https://openreview.net/forum?id=ZvUZvT8tgg}
+}
+
+
